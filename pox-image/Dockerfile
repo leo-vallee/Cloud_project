@@ -8,10 +8,11 @@ RUN git clone https://github.com/noxrepo/pox.git /pox
 
 # Copier ton script firewall dans l'image
 COPY firewall_controller.py /pox/ext/firewall_controller.py
+COPY arp.py /pox/ext/arp.py
 
 # Installer autres fichiers/configs si besoin
 
 WORKDIR /pox
 
 # Commande par défaut pour lancer POX avec ton firewall
-CMD ["python3", "pox.py", "log.level", "--DEBUG", "firewall_controller"]
+CMD ["python3", "pox.py", "log.level", "--DEBUG", "arp", "firewall_controller"]

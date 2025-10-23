@@ -15,5 +15,9 @@ RUN chmod +x /mininet/wait_and_launch.sh
 COPY init_reseau.py /mininet/init_reseau.py
 RUN chmod +x /mininet/init_reseau.py
 
+# Copie du script attaque
+COPY arp_attack.py /mininet/arp_attack.py
+RUN chmod +x /mininet/arp_attack.py
+
 ENTRYPOINT ["/bin/bash", "-c"]
 CMD ["bash /mininet/wait_and_launch.sh"]
