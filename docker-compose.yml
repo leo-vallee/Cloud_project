@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  pox:
+    build: ./pox-image
+    container_name: pox
+    tty: true
+    networks:
+      sdn-net:
+        ipv4_address: 172.18.0.2
+
+  mininet:
+    build: ./mininet-image
+    container_name: mininet
+    privileged: true
+    tty: true
+    networks:
+      sdn-net:
+        ipv4_address: 172.18.0.3
+    depends_on:
+      - pox
+
+
+networks:
+  sdn-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
