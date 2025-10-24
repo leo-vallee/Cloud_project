@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""
-Simulateur d'attaques ARP Spoofing pour Mininet
-Compatible avec le module arp_defense.py POX
-"""
 
 from mininet.net import Mininet
 from mininet.node import Controller, OVSSwitch, RemoteController
@@ -56,18 +52,21 @@ def customTopology():
     h2.cmd('while true; do curl -s http://10.0.1.10 > /dev/null; sleep 3; done &')
     h3.cmd('while true; do curl -s http://10.0.1.10 > /dev/null; sleep 3; done &')
 
-    # Pré-remplir les tables ARP pour réclamer les MACs
     net.pingAll()
     
     print('\n' + '='*60)
-    print('MENU DES ATTAQUES ARP DISPONIBLES')
+    print('MENU DES ATTAQUES DISPONIBLES')
     print('='*60)
     
     while True:
-        print('\n[1] ARP Spoofing - Usurpation du serveur H1 (IP Hijacking)')
+        print('\n[1] ARP Spoofing - Usurpation de H4 (IP Hijacking)')
         print('[2] ARP Flood - 1 MAC prétend avoir plusieurs IPs')
         print('[3] Gratuitous ARP Flood - Spam de requêtes ARP')
-        print('[8] Lancer CLI Mininet (debug)')
+        print('[4] SYN Flood - Spam de requêtes TCP SYN')
+        print('[5] UDP Flood - Spam de requêtes UDP')
+        print('[6] ICMP Flood - Spam de requêtes ICMP')
+        print('[7] Règle overflow des switch')
+        print('[9] Lancer CLI Mininet (debug)')
         print('[0] Quitter')
         
         choice = input('\nChoisir une attaque (1-3, 8, 0) : ').strip()
@@ -78,7 +77,15 @@ def customTopology():
             arp_flood_attack(net, h6)
         elif choice == '3':
             gratuitous_arp_flood(net, h6, '10.0.2.10')
-        elif choice == '8':
+        elif choice == '4':
+            syn_flood(net, h6, '10.0.2.10')
+        elif choice == '5':
+            udp_flood(net, h6, '10.0.2.10')
+        elif choice == '6':
+            icmp_flood(net, h6, '10.0.2.10')
+        elif choice == '7':
+            regle_overflow(net, h6)
+        elif choice == '9':
             print('\n=== CLI Mininet (tapez "exit" pour revenir au menu) ===')
             CLI(net)
         elif choice == '0':
@@ -89,6 +96,81 @@ def customTopology():
     print('\nArrêt du réseau...')
     net.stop()
 
+
+
+def syn_flood(net, attacker, target_ip):
+    print('\n' + '='*60)
+    print('ATTAQUE 4 : SYN FLOOD')
+    print('='*60)
+    print(f'Attaquant : {attacker.name}')
+    print(f'→ Envoi de 60 SYN vers {target_ip}')
+
+    if not test_ip(attacker, target_ip):
+        print('Timeout/IP bloquée ')
+        return
+
+    attacker.cmd('for i in {1..60}; do (nc -w 0 ' + target_ip + ' 80 &); done')
+    
+    print('✓ Attaque terminée')
+    print('\n   RÉSULTAT ATTENDU : Le firewall POX devrait détecter :')
+    print(f'   - "[ALERTE DDOS] SYN flood détecté par {attacker.IP()}"')
+    print(f'   - Blocage de IP de {attacker.name}')
+
+
+def udp_flood(net, attacker, target_ip):
+    print('\n' + '='*60)
+    print('ATTAQUE 4 : UDP FLOOD')
+    print('='*60)
+    print(f'Attaquant : {attacker.name}')
+    print(f'→ Envoi de 150 UDP vers {target_ip}')
+
+    if not test_ip(attacker, target_ip):
+        print('Timeout/IP bloquée')
+        return
+
+    attacker.cmd('for i in {1..150}; do echo "ATTACK" | nc -u -w 0 ' + target_ip + ' 53; done')
+    
+    print('✓ Attaque terminée')
+    print('\n   RÉSULTAT ATTENDU : Le firewall POX devrait détecter :')
+    print(f'   - "[ALERTE DDOS] UDP flood détecté par {attacker.IP()}"')
+    print(f'   - Blocage de IP de {attacker.name}')
+
+
+def icmp_flood(net, attacker, target_ip):
+    print('\n' + '='*60)
+    print('ATTAQUE 4 : ICMP FLOOD')
+    print('='*60)
+    print(f'Attaquant : {attacker.name}')
+    print(f'→ Envoi de 100 ICMP vers {target_ip}')
+
+    rc = attacker.cmd('ping -c 100 -i 0.01 -W 1 -w 3 ' + target_ip + '; echo $?').strip()
+
+    if rc != '0':
+        print('Timeout/IP bloquée')
+        return
+        
+    print('✓ Attaque terminée')
+    print('\n   RÉSULTAT ATTENDU : Le firewall POX devrait détecter :')
+    print(f'   - "[ALERTE DDOS] ICMP flood détecté par {attacker.IP()}"')
+    print(f'   - Blocage de IP de {attacker.name}')
+
+
+def test_ip(host, ip, count=1):
+    rc = host.cmd(f'ping -c {count} {ip} > /dev/null 2>&1; echo $?').strip()
+    return rc == '0'
+
+def regle_overflow(net, attacker):
+    print('\n' + '='*60)
+    print("SWITCH 1")
+    print('='*60)
+    
+    print(attacker.cmd('ovs-ofctl dump-flows s1'))
+
+    print('\n' + '='*60)
+    print("SWITCH 2")
+    print('='*60)
+
+    print(attacker.cmd('ovs-ofctl dump-flows s2'))
 
 def craft_arp_packet(src_mac, src_ip, dst_mac, dst_ip, operation='reply'):
     """
@@ -167,6 +249,12 @@ def arp_spoofing_attack(net, attacker, target_ip, target_host):
     print('\n' + '='*60)
     print('ATTAQUE 1 : ARP SPOOFING (IP Hijacking)')
     print('='*60)
+
+    if not test_ip(attacker, target_ip):
+        print('Timeout/IP bloquée ')
+        return
+
+
     print(f'Attaquant : {attacker.name} ({attacker.IP()})')
     print(f'Cible : {target_ip}')
     
@@ -187,7 +275,7 @@ def arp_spoofing_attack(net, attacker, target_ip, target_host):
         dst_ip=target_ip,
         operation='reply'
     )
-    
+   
     print("Envoi de 10 paquets ARP falsifiés via raw socket...")
     
     # Envoyer les paquets depuis l'attaquant
@@ -198,7 +286,7 @@ def arp_spoofing_attack(net, attacker, target_ip, target_host):
             print(f"  → {i + 1}/50 paquets envoyés...")
     
     print('✓ Attaque terminée')
-    print('\n⚠️  RÉSULTAT ATTENDU : Le firewall POX devrait détecter :')
+    print('\n    RÉSULTAT ATTENDU : Le firewall POX devrait détecter :')
     print(f'   - "[ALERTE ARP SPOOFING] IP {target_ip} change de MAC"')
     print(f'   - Blocage de la MAC {attacker_mac}')
 
@@ -207,6 +295,12 @@ def arp_flood_attack(net, attacker):
     print('\n' + '='*60)
     print('ATTAQUE 2 : ARP FLOOD (Multiple IPs per MAC)')
     print('='*60)
+
+    if not test_ip(attacker, "10.0.2.10"):
+        print('Timeout/IP bloquée ')
+        return
+
+
     print(f'Attaquant : {attacker.name} ({attacker.IP()})')
     print('→ Une seule MAC prétend avoir 10 IPs différentes')
     
@@ -237,7 +331,7 @@ def arp_flood_attack(net, attacker):
         time.sleep(0.2)
     
     print('✓ Attaque terminée')
-    print('\n⚠️  RÉSULTAT ATTENDU : Le firewall POX devrait détecter :')
+    print('\n    RÉSULTAT ATTENDU : Le firewall POX devrait détecter :')
     print(f'   - "[ALERTE ARP FLOOD] MAC prétend avoir 10 IPs"')
     print(f'   - Blocage de la MAC de {attacker.name}')
 
@@ -246,6 +340,11 @@ def gratuitous_arp_flood(net, attacker, target_ip):
     print('\n' + '='*60)
     print('ATTAQUE 3 : GRATUITOUS ARP FLOOD')
     print('='*60)
+
+    if not test_ip(attacker, target_ip):
+        print('Timeout/IP bloquée ')
+        return
+
     print(f'Attaquant : {attacker.name}')
     print(f'→ Envoi de 50 ARP REQUEST vers {target_ip}')
     
@@ -271,7 +370,7 @@ def gratuitous_arp_flood(net, attacker, target_ip):
             print(f'  → {i + 1}/50 paquets envoyés...')
     
     print('✓ Attaque terminée')
-    print('\n⚠️  RÉSULTAT ATTENDU : Le firewall POX devrait détecter :')
+    print('\n   RÉSULTAT ATTENDU : Le firewall POX devrait détecter :')
     print('   - "[ALERTE GRATUITOUS ARP] trop d\'ARP REQUEST"')
     print(f'   - Blocage de la MAC de {attacker.name}')
 
@@ -280,13 +379,9 @@ if __name__ == '__main__':
     setLogLevel('info')
     print('''
 ╔═══════════════════════════════════════════════════════════╗
-║   SIMULATEUR D'ATTAQUES ARP SPOOFING - MININET + POX     ║
+║   SIMULATEUR D'ATTAQUES ARP SPOOFING - MININET + POX      ║
 ║   Compatible avec arp_defense.py                          ║
 ╚═══════════════════════════════════════════════════════════╝
-
-PRÉREQUIS :
-1. Lancer POX avec : ./pox.py arp_defense
-2. Le contrôleur doit être accessible sur 172.18.0.2:6633
 ''')
     
     input('Appuyez sur Entrée pour démarrer la topologie...')

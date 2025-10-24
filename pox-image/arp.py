@@ -11,7 +11,7 @@ log = core.getLogger()
 
 class ARPDefenseFirewall(object):
     MAX_IPS_PER_MAC = 1
-    FENETRE_TEMPS = 300.0
+    FENETRE_TEMPS = 400.0
     DUREE_BLOCAGE = 60
 
     def __init__(self, connection):
@@ -46,7 +46,7 @@ class ARPDefenseFirewall(object):
         src_ip = str(arp_pkt.protosrc)
         src_mac = str(arp_pkt.hwsrc)
 
-        log.debug("ARP reçu: src_ip=%s src_mac=%s", src_ip, src_mac)
+        # log.debug("ARP reçu: src_ip=%s src_mac=%s", src_ip, src_mac)
 
         with self.lock:
             # Déjà bloqué -> renforcer le blocage et drop
