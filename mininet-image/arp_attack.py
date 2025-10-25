@@ -66,10 +66,10 @@ def customTopology():
         print('[5] UDP Flood - Spam de requêtes UDP')
         print('[6] ICMP Flood - Spam de requêtes ICMP')
         print('[7] Règle overflow des switch')
-        print('[9] Lancer CLI Mininet (debug)')
+        print('[8] Lancer CLI Mininet (debug)')
         print('[0] Quitter')
         
-        choice = input('\nChoisir une attaque (1-3, 8, 0) : ').strip()
+        choice = input('\nChoisir une attaque (1-6, 7, 8, 0) : ').strip()
         
         if choice == '1':
             arp_spoofing_attack(net, h6, '10.0.2.10', h4)
@@ -85,7 +85,7 @@ def customTopology():
             icmp_flood(net, h6, '10.0.2.10')
         elif choice == '7':
             regle_overflow(net, h6)
-        elif choice == '9':
+        elif choice == '8':
             print('\n=== CLI Mininet (tapez "exit" pour revenir au menu) ===')
             CLI(net)
         elif choice == '0':
