@@ -61,7 +61,6 @@ def customTopology():
     while True:
         print('\n[1] ARP Spoofing - Usurpation de H4 (IP Hijacking)')
         print('[2] ARP Flood - 1 MAC prétend avoir plusieurs IPs')
-        print('[3] Gratuitous ARP Flood - Spam de requêtes ARP')
         print('[4] SYN Flood - Spam de requêtes TCP SYN')
         print('[5] UDP Flood - Spam de requêtes UDP')
         print('[6] ICMP Flood - Spam de requêtes ICMP')
@@ -75,8 +74,6 @@ def customTopology():
             arp_spoofing_attack(net, h6, '10.0.2.10', h4)
         elif choice == '2':
             arp_flood_attack(net, h6)
-        elif choice == '3':
-            gratuitous_arp_flood(net, h6, '10.0.2.10')
         elif choice == '4':
             syn_flood(net, h6, '10.0.2.10')
         elif choice == '5':
@@ -334,46 +331,6 @@ def arp_flood_attack(net, attacker):
     print('\n    RÉSULTAT ATTENDU : Le firewall POX devrait détecter :')
     print(f'   - "[ALERTE ARP FLOOD] MAC prétend avoir 10 IPs"')
     print(f'   - Blocage de la MAC de {attacker.name}')
-
-
-def gratuitous_arp_flood(net, attacker, target_ip):
-    print('\n' + '='*60)
-    print('ATTAQUE 3 : GRATUITOUS ARP FLOOD')
-    print('='*60)
-
-    if not test_ip(attacker, target_ip):
-        print('Timeout/IP bloquée ')
-        return
-
-    print(f'Attaquant : {attacker.name}')
-    print(f'→ Envoi de 50 ARP REQUEST vers {target_ip}')
-    
-    attacker_mac = attacker.MAC()
-    attacker_ip = attacker.IP()
-    attacker_iface = attacker.defaultIntf().name
-    
-    # Créer un paquet ARP Request
-    arp_request = craft_arp_packet(
-        src_mac=attacker_mac,
-        src_ip=attacker_ip,
-        dst_mac="ff:ff:ff:ff:ff:ff",  # Broadcast
-        dst_ip=target_ip,
-        operation='request'  # ARP Request
-    )
-    
-    print('Envoi de 50 paquets ARP REQUEST...')
-    
-    for i in range(50):
-        send_raw_packet(attacker, attacker_iface, arp_request)
-        time.sleep(0.01)  # 100 paquets/seconde
-        if (i + 1) % 20 == 0:
-            print(f'  → {i + 1}/50 paquets envoyés...')
-    
-    print('✓ Attaque terminée')
-    print('\n   RÉSULTAT ATTENDU : Le firewall POX devrait détecter :')
-    print('   - "[ALERTE GRATUITOUS ARP] trop d\'ARP REQUEST"')
-    print(f'   - Blocage de la MAC de {attacker.name}')
-
 
 if __name__ == '__main__':
     setLogLevel('info')

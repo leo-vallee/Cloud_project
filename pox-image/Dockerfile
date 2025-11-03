@@ -7,12 +7,12 @@ RUN apt-get update && apt-get install -y python3 git
 RUN git clone https://github.com/noxrepo/pox.git /pox
 
 # Copier ton script firewall dans l'image
-COPY firewall_controller.py /pox/ext/firewall_controller.py
-COPY arp.py /pox/ext/arp.py
+COPY ddos_detection.py /pox/ext/ddos_detection.py
+COPY arp_detection.py /pox/ext/arp_detection.py
 
 # Installer autres fichiers/configs si besoin
 
 WORKDIR /pox
 
 # Commande par défaut pour lancer POX avec ton firewall
-CMD ["python3", "pox.py", "log.level", "--DEBUG", "arp", "firewall_controller"]
+CMD ["python3", "pox.py", "log.level", "--DEBUG", "arp_detection", "ddos_detection"]
