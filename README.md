@@ -64,8 +64,7 @@ Pour un contrôle plus fin, vous pouvez démarrer l'environnement et les attaque
 
 Une vidéo de démonstration du projet est disponible ici :
 
-<iframe width="560" height="315" src="https://www.youtube.com/embed/video-id" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-[![Watch the video](https://i.sstatic.net/Vp2cE.png)](https://youtu.be/vFBTHSI82Ek)
+<https://youtu.be/vFBTHSI82Ek>
 
 ##  Problème
 
