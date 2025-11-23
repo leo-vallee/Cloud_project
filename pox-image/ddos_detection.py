@@ -13,45 +13,53 @@ import threading
 log = core.getLogger()
 
 class MultiLayerFirewall(object):
+    # --- PARAMÈTRES DE DÉTECTION (Basés sur un taux par seconde) ---
     SEUIL_SYN = 50
-    SEUIL_UDP = 100
+    SEUIL_UDP = 50
     SEUIL_ICMP = 50
     SEUIL_ACK = 200
 
-    FENETRE_TEMPS = 1.0
-    DUREE_BLOCAGE = 60
+    FENETRE_TEMPS = 1.0  # Durée de la fenêtre de temps en secondes
+    DUREE_BLOCAGE = 10   # Durée du blocage en secondes
 
     WHITELIST = {
-        "10.0.1.10",
+        "10.0.1.10", # Exemple: Le serveur Web cible qui génère aussi du trafic légitime
     }
 
     def __init__(self, connection):
         self.connection = connection
         connection.addListeners(self)
-        log.info("Firewall multi-couches connecté au switch %s", connection)
+        log.info("Firewall [DOS] connecté au switch %s", connection)
 
+        # Compteurs pour la détection basée sur la fenêtre de temps
         self.syn_counts = defaultdict(int)
         self.udp_counts = defaultdict(int)
         self.icmp_counts = defaultdict(int)
         self.ack_counts = defaultdict(int)
 
         self.last_reset = time.time()
-        self.blocked_ips = {}   # {ip: (timestamp, raison)}
-        self.blocked_macs = {}  # {mac: (timestamp, raison)}  # facultatif si tu veux tracer
+        self.blocked_ips = {}    # {ip: (timestamp, raison)}
+        self.blocked_macs = {}   # {mac: (timestamp, raison)}
 
+        # Verrous pour l'accès concurrent aux données
         self.counters_lock = threading.Lock()
         self.blocked_lock = threading.Lock()
-
+        
     def _handle_PacketIn(self, event):
-        packet = event.parsed
-        if not packet or not packet.parsed:
+        try:
+            packet = event.parsed
+            if not packet or not packet.parsed:
+                return
+        except AttributeError as e:
             return
 
         self._unblock_expired_ips()
 
+        # Traitement du trafic IP (Couches 3/4)
         if packet.type == ethernet.IP_TYPE:
             ip_pkt = packet.payload
             src_ip = ip_pkt.srcip.toStr()
+            src_mac = str(packet.src)
 
             if src_ip in self.WHITELIST:
                 self._forward_packet(event)
@@ -62,32 +70,23 @@ class MultiLayerFirewall(object):
                     log.debug("Paquet DROP de %s (déjà bloqué IP)", src_ip)
                     return
 
-            is_attack = False
+            # --- LOGIQUE DE COMPTAGE UNIQUE (MÉCANISME PÉRIODIQUE) ---
             with self.counters_lock:
                 if ip_pkt.protocol == ipv4.TCP_PROTOCOL:
                     tcp_seg = ip_pkt.payload
                     if tcp_seg.SYN and not tcp_seg.ACK:
                         self.syn_counts[src_ip] += 1
-                        if self.syn_counts[src_ip] > self.SEUIL_SYN:
-                            is_attack = True
+                    # Compte les paquets ACK (ACK flood)
                     elif tcp_seg.ACK and not tcp_seg.SYN:
                         self.ack_counts[src_ip] += 1
-                        if self.ack_counts[src_ip] > self.SEUIL_ACK:
-                            is_attack = True
+                
                 elif ip_pkt.protocol == ipv4.UDP_PROTOCOL:
                     self.udp_counts[src_ip] += 1
-                    if self.udp_counts[src_ip] > self.SEUIL_UDP:
-                        is_attack = True
+                
                 elif ip_pkt.protocol == ipv4.ICMP_PROTOCOL:
                     self.icmp_counts[src_ip] += 1
-                    if self.icmp_counts[src_ip] > self.SEUIL_ICMP:
-                        is_attack = True
 
-            if is_attack:
-                now = time.time()
-                self._block_ip_immediate(src_ip, now, event)
-                return
-
+            # --- VÉRIFICATION DE LA FENÊTRE DE TEMPS ET BLOCAGE ---
             now = time.time()
             if now - self.last_reset >= self.FENETRE_TEMPS:
                 self._check_and_block_all_attacks(now)
@@ -95,8 +94,9 @@ class MultiLayerFirewall(object):
                 self.last_reset = now
 
             self._forward_packet(event)
+            
+        # Traitement du trafic non-IP (L2/ARP)
         else:
-            # Laisse passer non-IP (ARP/L2) sauf si la MAC est déjà bloquée par renforcement
             src_mac_l2 = str(packet.src)
             with self.blocked_lock:
                 if src_mac_l2 in self.blocked_macs:
@@ -105,71 +105,56 @@ class MultiLayerFirewall(object):
             self._forward_packet(event)
 
     def _check_and_block_all_attacks(self, now):
+        """
+        Vérifie tous les compteurs et bloque si un seuil est dépassé.
+        Ceci est appelé UNIQUEMENT à la fin de la fenêtre de temps.
+        """
+        
+        # Liste des attaques détectées dans cette fenêtre
+        detected_attacks = {} # {ip: (count, seuil, raison)}
+
         with self.counters_lock:
             for ip, count in self.syn_counts.items():
                 if count > self.SEUIL_SYN:
-                    with self.blocked_lock:
-                        if ip not in self.blocked_ips:
-                            self._block_ip(ip, now, f"SYN Flood ({count} SYN/s)")
+                    detected_attacks[ip] = (count, self.SEUIL_SYN, "SYN Flood")
             for ip, count in self.udp_counts.items():
                 if count > self.SEUIL_UDP:
-                    with self.blocked_lock:
-                        if ip not in self.blocked_ips:
-                            self._block_ip(ip, now, f"UDP Flood ({count} UDP/s)")
+                    detected_attacks[ip] = (count, self.SEUIL_UDP, "UDP Flood")
             for ip, count in self.icmp_counts.items():
                 if count > self.SEUIL_ICMP:
-                    with self.blocked_lock:
-                        if ip not in self.blocked_ips:
-                            self._block_ip(ip, now, f"ICMP Flood ({count} ICMP/s)")
+                    detected_attacks[ip] = (count, self.SEUIL_ICMP, "ICMP Flood")
             for ip, count in self.ack_counts.items():
                 if count > self.SEUIL_ACK:
-                    with self.blocked_lock:
-                        if ip not in self.blocked_ips:
-                            self._block_ip(ip, now, f"ACK Flood ({count} ACK/s)")
+                    detected_attacks[ip] = (count, self.SEUIL_ACK, "ACK Flood")
+        
+        # Appliquer les blocages
+        for ip, (count, seuil, raison) in detected_attacks.items():
+            if ip in self.WHITELIST:
+                continue
 
-    def _block_ip_immediate(self, ip, timestamp, event):
-        with self.blocked_lock:
-            if ip in self.blocked_ips:
-                return
-
-            # Déterminer le type d'attaque pour logging (optionnel)
-            protocol = "UNKNOWN"
-            with self.counters_lock:
-                if self.syn_counts[ip] > self.SEUIL_SYN:
-                    protocol = f"SYN Flood ({self.syn_counts[ip]} SYN/s)"
-                elif self.udp_counts[ip] > self.SEUIL_UDP:
-                    protocol = f"UDP Flood ({self.udp_counts[ip]} UDP/s)"
-                elif self.icmp_counts[ip] > self.SEUIL_ICMP:
-                    protocol = f"ICMP Flood ({self.icmp_counts[ip]} ICMP/s)"
-                elif self.ack_counts[ip] > self.SEUIL_ACK:
-                    protocol = f"ACK Flood ({self.ack_counts[ip]} ACK/s)"
-
-            self._block_ip(ip, timestamp, protocol)
-
-            # Renforcement: si MAC L2 connue dans ce PacketIn, bloquer L2 et ARP
-            try:
-                mac = str(event.parsed.src)
-                if mac:
-                    self._block_mac_l2(mac)
-                    self._block_arp_from_mac(mac)
-                    self.blocked_macs[mac] = (timestamp, f"Reinforced for {ip}")
-            except Exception:
-                pass
+            with self.blocked_lock:
+                if ip not in self.blocked_ips:
+                    
+                    log.warning("[ALERTE DDoS] détecté de %s (%d paq/s > %d) - BLOCAGE", ip, count, seuil)
+                                
+                    self._block_ip(ip, now, f"{raison} ({count} paq/s)")
+                
 
     def _block_ip(self, ip, timestamp, raison):
-        log.warning("[ALERTE DDoS] %s détecté de %s - BLOCAGE", raison, ip)
-
+        """Bloque une adresse IP source au niveau OpenFlow (L3)."""
         fm = of.ofp_flow_mod()
         fm.match.dl_type = ethernet.IP_TYPE
         fm.match.nw_src = ip
-        fm.priority = 2000  # plus haut que forwarding, plus bas que ARP defense
+        fm.priority = 2000
         fm.hard_timeout = self.DUREE_BLOCAGE
         self.connection.send(fm)
 
         self.blocked_ips[ip] = (timestamp, raison)
-        log.info("→ %s bloqué (IP) pour %ds", ip, self.DUREE_BLOCAGE)
+        log.info("%s bloqué (IP) pour %ds", ip, self.DUREE_BLOCAGE)
 
+    
     def _block_mac_l2(self, mac):
+        # ... (Identique au code original)
         try:
             ea = EthAddr(mac)
         except Exception:
@@ -180,9 +165,10 @@ class MultiLayerFirewall(object):
         fm.priority = 1900
         fm.hard_timeout = self.DUREE_BLOCAGE
         self.connection.send(fm)
-        log.info("→ MAC %s bloquée (L2) pour %ds", mac, self.DUREE_BLOCAGE)
+        log.info("MAC %s bloquée (L2) pour %ds", mac, self.DUREE_BLOCAGE)
 
     def _block_arp_from_mac(self, mac):
+        # ... (Identique au code original)
         try:
             ea = EthAddr(mac)
         except Exception:
@@ -194,38 +180,42 @@ class MultiLayerFirewall(object):
         fm.priority = 1950
         fm.hard_timeout = self.DUREE_BLOCAGE
         self.connection.send(fm)
-        log.info("→ MAC %s bloquée (ARP) pour %ds", mac, self.DUREE_BLOCAGE)
-
+        log.info("MAC %s bloquée (ARP) pour %ds", mac, self.DUREE_BLOCAGE)
+        
     def _unblock_expired_ips(self):
+        # ... (Identique au code original)
         now = time.time()
         with self.blocked_lock:
             expired_ip = [ip for ip, (ts, _) in self.blocked_ips.items() if now - ts > self.DUREE_BLOCAGE]
             for ip in expired_ip:
                 raison = self.blocked_ips[ip][1]
                 del self.blocked_ips[ip]
-                log.info("✓ %s débloqué (timeout expiré - %s)", ip, raison)
+                log.info("%s débloqué (timeout expiré)", ip)
 
             expired_mac = [m for m, (ts, _) in self.blocked_macs.items() if now - ts > self.DUREE_BLOCAGE]
             for m in expired_mac:
                 del self.blocked_macs[m]
 
     def _clear_counters(self):
-        self.syn_counts.clear()
-        self.udp_counts.clear()
-        self.icmp_counts.clear()
-        self.ack_counts.clear()
+        # ... (Identique au code original)
+        with self.counters_lock:
+            self.syn_counts.clear()
+            self.udp_counts.clear()
+            self.icmp_counts.clear()
+            self.ack_counts.clear()
 
     def _forward_packet(self, event):
+        # ... (Identique au code original)
         msg = of.ofp_packet_out()
         msg.data = event.ofp
+        # NOTE: OFPP_FLOOD est utilisé par défaut. Un L2-learning complet 
+        # serait préférable pour le trafic légitime.
         msg.actions.append(of.ofp_action_output(port=of.OFPP_FLOOD))
         self.connection.send(msg)
 
 def launch():
     def start_switch(event):
-        log.info("Connexion switch au firewall multi-couches")
         MultiLayerFirewall(event.connection)
 
     core.openflow.addListenerByName("ConnectionUp", start_switch)
-    log.info("=== Contrôleur Firewall Multi-Couches Démarré ===")
-    log.info("Protection contre: SYN/UDP/ICMP/ACK Floods")
+    log.info("=== Contrôleur POX DOS Defense démarré ===")

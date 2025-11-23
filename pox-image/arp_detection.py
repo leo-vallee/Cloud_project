@@ -12,11 +12,12 @@ log = core.getLogger()
 class ARPDefenseFirewall(object):
     MAX_IPS_PER_MAC = 1
     FENETRE_TEMPS = 400.0
-    DUREE_BLOCAGE = 60
+    DUREE_BLOCAGE = 10
 
     def __init__(self, connection):
         self.connection = connection
         connection.addListeners(self)
+        log.info("Firewall [ARP] connecté au switch %s", connection)
 
         self.ip_mac_table = {}               # {ip(str): mac(str)}
         self.mac_ip_set = defaultdict(set)   # {mac(str): set(ip)}
@@ -26,8 +27,12 @@ class ARPDefenseFirewall(object):
         self.lock = threading.Lock()
 
     def _handle_PacketIn(self, event):
-        packet = event.parsed
-        if not packet or not packet.parsed:
+
+        try:
+            packet = event.parsed
+            if not packet or not packet.parsed:
+                return
+        except AttributeError as e:
             return
 
         self._unblock_expired()
@@ -123,7 +128,6 @@ class ARPDefenseFirewall(object):
 
 def launch():
     def start(event):
-        log.info("Lancement du firewall ARP Defense")
         ARPDefenseFirewall(event.connection)
     core.openflow.addListenerByName("ConnectionUp", start)
     log.info("=== Contrôleur POX ARP Defense démarré ===")
