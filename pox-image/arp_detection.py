@@ -19,9 +19,9 @@ class ARPDefenseFirewall(object):
         connection.addListeners(self)
         log.info("Firewall [ARP] connecté au switch %s", connection)
 
-        self.ip_mac_table = {}               # {ip(str): mac(str)}
-        self.mac_ip_set = defaultdict(set)   # {mac(str): set(ip)}
-        self.blocked_macs = {}               # {mac(str): (ts, reason)}
+        self.ip_mac_table = {}               
+        self.mac_ip_set = defaultdict(set)  
+        self.blocked_macs = {}               
 
         self.last_reset = time.time()
         self.lock = threading.Lock()
@@ -37,7 +37,6 @@ class ARPDefenseFirewall(object):
 
         self._unblock_expired()
 
-        # Laisser passer tout sauf ARP, sauf si MAC est déjà bloquée
         if packet.type != ethernet.ARP_TYPE:
             src_mac_l2 = str(packet.src)
             if src_mac_l2 in self.blocked_macs:
@@ -46,7 +45,6 @@ class ARPDefenseFirewall(object):
             self._forward_packet(event)
             return
 
-        # Paquet ARP
         arp_pkt = packet.payload
         src_ip = str(arp_pkt.protosrc)
         src_mac = str(arp_pkt.hwsrc)
@@ -54,7 +52,6 @@ class ARPDefenseFirewall(object):
         # log.debug("ARP reçu: src_ip=%s src_mac=%s", src_ip, src_mac)
 
         with self.lock:
-            # Déjà bloqué -> renforcer le blocage et drop
             if src_mac in self.blocked_macs:
                 self._block_mac_immediate(src_mac, "Déjà bloquée - renforcement")
                 return
@@ -75,13 +72,12 @@ class ARPDefenseFirewall(object):
                 self.mac_ip_set[src_mac].remove(src_ip)
                 return
 
-            # Apprentissage légitime
+            
             self.ip_mac_table[src_ip] = src_mac
 
-        # Forward ARP légitime
+        
         self._forward_packet(event)
 
-        # Reset périodique optionnel (pas de purge agressive)
         now = time.time()
         if now - self.last_reset > self.FENETRE_TEMPS:
             log.info("Fenêtre atteinte, maintien des tables (pas de purge agressive).")
@@ -110,7 +106,7 @@ class ARPDefenseFirewall(object):
         self.connection.send(fm_l2)
 
         self.blocked_macs[mac] = (time.time(), raison)
-        log.info("→ MAC %s bloquée (ARP+L2) pour %ds (%s)", mac, self.DUREE_BLOCAGE, raison)
+        log.info("MAC %s bloquée (ARP+L2) pour %ds (%s)", mac, self.DUREE_BLOCAGE, raison)
 
     def _unblock_expired(self):
         now = time.time()
@@ -118,7 +114,7 @@ class ARPDefenseFirewall(object):
         for m in expired:
             raison = self.blocked_macs[m][1]
             del self.blocked_macs[m]
-            log.info("✓ MAC %s débloquée (timeout expiré - %s)", m, raison)
+            log.info("MAC %s débloquée (timeout expiré - %s)", m, raison)
 
     def _forward_packet(self, event):
         msg = of.ofp_packet_out()

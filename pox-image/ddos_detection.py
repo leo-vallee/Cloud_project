@@ -13,17 +13,16 @@ import threading
 log = core.getLogger()
 
 class MultiLayerFirewall(object):
-    # --- PARAMÈTRES DE DÉTECTION (Basés sur un taux par seconde) ---
     SEUIL_SYN = 50
     SEUIL_UDP = 50
     SEUIL_ICMP = 50
     SEUIL_ACK = 200
 
-    FENETRE_TEMPS = 1.0  # Durée de la fenêtre de temps en secondes
-    DUREE_BLOCAGE = 10   # Durée du blocage en secondes
+    FENETRE_TEMPS = 1.0 
+    DUREE_BLOCAGE = 10
 
     WHITELIST = {
-        "10.0.1.10", # Exemple: Le serveur Web cible qui génère aussi du trafic légitime
+        "10.0.1.10",
     }
 
     def __init__(self, connection):
@@ -31,17 +30,15 @@ class MultiLayerFirewall(object):
         connection.addListeners(self)
         log.info("Firewall [DOS] connecté au switch %s", connection)
 
-        # Compteurs pour la détection basée sur la fenêtre de temps
         self.syn_counts = defaultdict(int)
         self.udp_counts = defaultdict(int)
         self.icmp_counts = defaultdict(int)
         self.ack_counts = defaultdict(int)
 
         self.last_reset = time.time()
-        self.blocked_ips = {}    # {ip: (timestamp, raison)}
-        self.blocked_macs = {}   # {mac: (timestamp, raison)}
+        self.blocked_ips = {}   
+        self.blocked_macs = {}
 
-        # Verrous pour l'accès concurrent aux données
         self.counters_lock = threading.Lock()
         self.blocked_lock = threading.Lock()
         
@@ -55,7 +52,6 @@ class MultiLayerFirewall(object):
 
         self._unblock_expired_ips()
 
-        # Traitement du trafic IP (Couches 3/4)
         if packet.type == ethernet.IP_TYPE:
             ip_pkt = packet.payload
             src_ip = ip_pkt.srcip.toStr()
@@ -70,13 +66,11 @@ class MultiLayerFirewall(object):
                     log.debug("Paquet DROP de %s (déjà bloqué IP)", src_ip)
                     return
 
-            # --- LOGIQUE DE COMPTAGE UNIQUE (MÉCANISME PÉRIODIQUE) ---
             with self.counters_lock:
                 if ip_pkt.protocol == ipv4.TCP_PROTOCOL:
                     tcp_seg = ip_pkt.payload
                     if tcp_seg.SYN and not tcp_seg.ACK:
                         self.syn_counts[src_ip] += 1
-                    # Compte les paquets ACK (ACK flood)
                     elif tcp_seg.ACK and not tcp_seg.SYN:
                         self.ack_counts[src_ip] += 1
                 
@@ -95,7 +89,6 @@ class MultiLayerFirewall(object):
 
             self._forward_packet(event)
             
-        # Traitement du trafic non-IP (L2/ARP)
         else:
             src_mac_l2 = str(packet.src)
             with self.blocked_lock:
@@ -105,13 +98,8 @@ class MultiLayerFirewall(object):
             self._forward_packet(event)
 
     def _check_and_block_all_attacks(self, now):
-        """
-        Vérifie tous les compteurs et bloque si un seuil est dépassé.
-        Ceci est appelé UNIQUEMENT à la fin de la fenêtre de temps.
-        """
         
-        # Liste des attaques détectées dans cette fenêtre
-        detected_attacks = {} # {ip: (count, seuil, raison)}
+        detected_attacks = {}
 
         with self.counters_lock:
             for ip, count in self.syn_counts.items():
@@ -127,7 +115,6 @@ class MultiLayerFirewall(object):
                 if count > self.SEUIL_ACK:
                     detected_attacks[ip] = (count, self.SEUIL_ACK, "ACK Flood")
         
-        # Appliquer les blocages
         for ip, (count, seuil, raison) in detected_attacks.items():
             if ip in self.WHITELIST:
                 continue
@@ -141,7 +128,6 @@ class MultiLayerFirewall(object):
                 
 
     def _block_ip(self, ip, timestamp, raison):
-        """Bloque une adresse IP source au niveau OpenFlow (L3)."""
         fm = of.ofp_flow_mod()
         fm.match.dl_type = ethernet.IP_TYPE
         fm.match.nw_src = ip
@@ -151,39 +137,8 @@ class MultiLayerFirewall(object):
 
         self.blocked_ips[ip] = (timestamp, raison)
         log.info("%s bloqué (IP) pour %ds", ip, self.DUREE_BLOCAGE)
-
-    
-    def _block_mac_l2(self, mac):
-        # ... (Identique au code original)
-        try:
-            ea = EthAddr(mac)
-        except Exception:
-            log.error("EthAddr invalide pour %s", mac)
-            return
-        fm = of.ofp_flow_mod()
-        fm.match.dl_src = ea
-        fm.priority = 1900
-        fm.hard_timeout = self.DUREE_BLOCAGE
-        self.connection.send(fm)
-        log.info("MAC %s bloquée (L2) pour %ds", mac, self.DUREE_BLOCAGE)
-
-    def _block_arp_from_mac(self, mac):
-        # ... (Identique au code original)
-        try:
-            ea = EthAddr(mac)
-        except Exception:
-            log.error("EthAddr invalide pour %s", mac)
-            return
-        fm = of.ofp_flow_mod()
-        fm.match.dl_type = ethernet.ARP_TYPE
-        fm.match.dl_src = ea
-        fm.priority = 1950
-        fm.hard_timeout = self.DUREE_BLOCAGE
-        self.connection.send(fm)
-        log.info("MAC %s bloquée (ARP) pour %ds", mac, self.DUREE_BLOCAGE)
         
     def _unblock_expired_ips(self):
-        # ... (Identique au code original)
         now = time.time()
         with self.blocked_lock:
             expired_ip = [ip for ip, (ts, _) in self.blocked_ips.items() if now - ts > self.DUREE_BLOCAGE]
@@ -197,7 +152,6 @@ class MultiLayerFirewall(object):
                 del self.blocked_macs[m]
 
     def _clear_counters(self):
-        # ... (Identique au code original)
         with self.counters_lock:
             self.syn_counts.clear()
             self.udp_counts.clear()
@@ -205,11 +159,8 @@ class MultiLayerFirewall(object):
             self.ack_counts.clear()
 
     def _forward_packet(self, event):
-        # ... (Identique au code original)
         msg = of.ofp_packet_out()
         msg.data = event.ofp
-        # NOTE: OFPP_FLOOD est utilisé par défaut. Un L2-learning complet 
-        # serait préférable pour le trafic légitime.
         msg.actions.append(of.ofp_action_output(port=of.OFPP_FLOOD))
         self.connection.send(msg)
 
